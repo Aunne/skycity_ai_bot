@@ -34,9 +34,11 @@ async def on_message(message):
 
     # Generate response
     async with message.channel.typing():
-        
+        try:
             result = chat_with_ai(conversation_id, source_id, user_text)
-        
+        except HTTPError:
+            await message.channel.send("伺服器錯誤 等下再試")
+            return
 
     # Check completion
     if not isinstance(result, dict):
