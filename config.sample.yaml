@@ -1,0 +1,4 @@
+SQLALCHEMY_DATABASE_URI: "sqlite:///data.db"
+SQLALCHEMY_TRACK_MODIFICATIONS: False
+DIFY_API_KEY: "your_dify_api_key"
+DISCORD_BOT_TOKEN: "your_discord_bot_token"
