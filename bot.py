@@ -26,19 +26,17 @@ async def on_message(message):
         conversation_id = None
 
     # Check if the text starts with "bot"
-    if not user_text.startswith("天空之城專業顧問"):
+    if not user_text.startswith("顧問"):
         return
 
     # Remove the prefix
-    user_text = user_text.lstrip("天空之城專業顧問")
+    user_text = user_text.lstrip("顧問")
 
     # Generate response
     async with message.channel.typing():
-        try:
+        
             result = chat_with_ai(conversation_id, source_id, user_text)
-        except HTTPError:
-            await message.channel.send("伺服器錯誤 等下再試")
-            return
+        
 
     # Check completion
     if not isinstance(result, dict):
