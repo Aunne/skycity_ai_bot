@@ -1,1 +1,1 @@
-python -m pip install requests dify-client PyYAML discord.py
+python -m pip install requests dify-client PyYAML discord.py SQLAlchemy
