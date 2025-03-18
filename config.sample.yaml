@@ -2,3 +2,6 @@ SQLALCHEMY_DATABASE_URI: "sqlite:///data.db"
 SQLALCHEMY_TRACK_MODIFICATIONS: False
 DIFY_API_KEY: "your_dify_api_key"
 DISCORD_BOT_TOKEN: "your_discord_bot_token"
+
+ALLOWED_CHANNELS : [ ALLOWED_CHANNEL_id1,ALLOWED_CHANNEL_id2 ... ]
+LIMIT_SPEAKING_CHANNELS : False # True will turn on it 

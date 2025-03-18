@@ -26,3 +26,6 @@ dify_chat_client = ChatClient(config.get("DIFY_API_KEY"))
 intents = DiscordIntents.default()
 intents.message_content = True
 discord_client = DiscordClient(intents=intents)
+
+LIMIT_SPEAKING_CHANNELS = config.get("LIMIT_SPEAKING_CHANNELS")
+ALLOWED_CHANNELS = config.get("ALLOWED_CHANNELS")
