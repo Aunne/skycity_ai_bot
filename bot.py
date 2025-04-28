@@ -38,6 +38,11 @@ async def on_message(message):
     # Remove the prefix
     user_text = user_text.lstrip("顧問")
 
+    # 如果遇到打招呼直接回覆這個節省效率
+    if user_text == "你好":
+        await message.channel.send("你好,有什麼可以幫助您的?")
+        return
+    
     # Generate response
     async with message.channel.typing():
         try:
