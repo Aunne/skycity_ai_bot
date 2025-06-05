@@ -1,3 +1,5 @@
 .venv
 config.yaml
 data.db
+invite_log.txt
+__pycache__
