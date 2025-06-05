@@ -1,8 +1,6 @@
-from requests import HTTPError
-
-from dify import Base, Conversation, chat_with_ai
-from config import db_engine, db_session, config, ALLOWED_CHANNELS, LIMIT_SPEAKING_CHANNELS
+from config import config, ALLOWED_CHANNELS, LIMIT_SPEAKING_CHANNELS
 from config import discord_client as client
+from command import *
 
 
 @client.event
@@ -17,64 +15,12 @@ async def on_message(message):
 
     # Get data from the message
     source_id = message.channel.id
-    user_text = message.content
-
-    # Check if the text starts with "bot"
-    if not user_text.startswith("顧問"):
-        return
-
+    
     # Check if the channels id is allowed
     if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in ALLOWED_CHANNELS):
         return
-
-    # Get conversation
-    conversation = db_session.query(
-        Conversation).filter_by(source_id=source_id).first()
-    if isinstance(conversation, Conversation):
-        conversation_id = conversation.conversation_id
-    else:
-        conversation_id = None
-
-    # Remove the prefix
-    user_text = user_text.lstrip("顧問")
-
-    # 如果遇到打招呼直接回覆這個節省效率
-    if user_text == "你好":
-        await message.channel.send("你好,有什麼可以幫助您的?")
-        return
+    # 判斷與執行使用者說的內容是否要執行
+    await command_check( message )
     
-    # Generate response
-    async with message.channel.typing():
-        try:
-            result = chat_with_ai(conversation_id, source_id, user_text)
-        except HTTPError:
-            await message.channel.send("伺服器錯誤 等下再試")
-            return
-
-    # Check completion
-    if not isinstance(result, dict):
-        return
-
-    # Extract answer from result
-    ai_text = result.get("answer")
-    ai_text = ai_text.strip()
-
-    # Send the awnsers
-    ai_text_length = len(ai_text)
-    for index in range(0, ai_text_length, 2000):
-        await message.channel.send(ai_text[index: index + 2000])
-
-    # Set conversation
-    if not conversation:
-        conversation_id = result.get("conversation_id")
-        conversation = Conversation(
-            conversation_id=conversation_id,
-            source_id=source_id,
-        )
-        db_session.add(conversation)
-        db_session.commit()
-
-
 if __name__ == "__main__":
-    Base.metadata.create_all(bind=db_engine)
     client.run(config.get("DISCORD_BOT_TOKEN"))
