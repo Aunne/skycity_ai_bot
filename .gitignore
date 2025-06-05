@@ -3,3 +3,6 @@ config.yaml
 data.db
 invite_log.txt
 __pycache__
+./__pycache__/config.cpython-311.pyc
+./__pycache__/dify.cpython-311.pyc
+./__pycache__/command.cpython-311.pyc
