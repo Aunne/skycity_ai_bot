@@ -33,7 +33,7 @@ async def chat( message ):
         conversation_id = None
 
     # Remove the prefix
-    user_text = user_text.lstrip("顧問")
+    user_text = message.content.lstrip("顧問")
 
     # 如果遇到打招呼直接回覆這個節省效率
     if user_text == "你好":
