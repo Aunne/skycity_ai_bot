@@ -73,7 +73,7 @@ async def chat( message ):
 
 
 
-async def invite( message ):
+async def inviteurl( message ):
     """
         建立永久單次伺服器邀請
     """
@@ -82,7 +82,8 @@ async def invite( message ):
         return
 
     # 確定下指令的人有權限
-    if message.author.id not in [ 626767393665843210, 692029559754719314, 742648999143538710, 614095160829149373 ]:
+    role_names = [role.name for role in message.author.roles]
+    if "invite" not in role_names:
         await message.channel.send("您沒有建立邀請的權限 , 請洽有權限的人!")
         return
     
@@ -92,21 +93,21 @@ async def invite( message ):
         max_age=0,        # 永不過期，單位為秒
         unique=True       # 確保每次都新建連結
     )
-
+    
+    # 紀錄 log 
     log_msg = f"{message.author} 在 {message.channel} 產生邀請：{invite.url}"
     logging.info(log_msg)    # 寫 log
     await message.channel.send(f"邀請連結：{invite.url}")
     
-
+# 用來判斷是否有內含的指令並執行
 async def command_check( message ):
     user_text = message.content
-    for i in command:
-        if user_text.startswith(i):
-            await command_action[i]( message )
+    for command in command_actions:
+        if user_text.startswith( command ):
+            await command_actions[ command ]( message )
 
 
-command = ["顧問","/inviteurl"]
-command_action = {
+command_actions = {
     "顧問" : chat,
-    "/inviteurl":invite
+    "/inviteurl":inviteurl
 }
