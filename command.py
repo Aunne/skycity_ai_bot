@@ -123,8 +123,6 @@ async def setPass( message:discord.Member ):
     # Check if the channels id is allowed
     if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in [713523805233872966]):
         return
-    
-    
 
     # 取得 message.mentions
     if not message.mentions:
@@ -146,7 +144,7 @@ async def setPass( message:discord.Member ):
     except Exception as e:
         await message.channel.send(f"添加失敗: {e}")
     
-    
+
 # 用來判斷是否有內含的指令並執行
 async def command_check( message:discord.Member ):
     # 取得使用者說話的內容
