@@ -1,4 +1,4 @@
-from config import config, ALLOWED_CHANNELS, LIMIT_SPEAKING_CHANNELS
+from config import config
 from config import discord_client as client
 from command import *
 
@@ -10,16 +10,15 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+    """
+    取得 on_message 事件
+    並且做基礎處理 不要讓 bot 回應自己
+    """
+    # 不要回應自己
     if message.author == client.user:
         return
-
-    # Get data from the message
-    source_id = message.channel.id
     
-    # Check if the channels id is allowed
-    if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in ALLOWED_CHANNELS):
-        return
-    # 判斷與執行使用者說的內容是否要執行
+    # 判斷使用者說的內容是否要執行
     await command_check( message )
     
 if __name__ == "__main__":
