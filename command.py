@@ -85,7 +85,7 @@ async def inviteurl( message:discord.Member ):
         return
     # 取得對話頻道 id 
     source_id = message.channel.id
-    # Check if the channels id is allowed
+    # 確認 channel id 允許發言 ( 確認是否有啟限制頻道功能 )
     if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in ALLOWED_CHANNELS):
         return
 
