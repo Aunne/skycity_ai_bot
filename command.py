@@ -105,7 +105,9 @@ async def inviteurl( message:discord.Member ):
     # 紀錄 log 
     log_msg = f"{message.author} 在 {message.channel} 產生邀請：{invite.url}"
     logging.info(log_msg)    # 寫 log
-    await message.channel.send(f"邀請連結：{invite.url}")
+    await message.channel.send(f"邀請連結已傳送至私人訊息!")
+    await message.author.send(f"邀請連結：{invite.url}")
+    
 
 
 async def setPass( message:discord.Member ):
