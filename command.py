@@ -129,7 +129,7 @@ async def test(message : discord.Member):
     # 生成回應
     async with message.channel.typing():
         try:
-            result = chat_with_ai( source_id, user_text)
+            result = chat_with_ai( None ,source_id, user_text)
         except HTTPError:
             await message.channel.send("伺服器錯誤 等下再試")
             return
