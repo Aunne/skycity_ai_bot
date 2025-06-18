@@ -109,7 +109,7 @@ async def inviteurl( message:discord.Member ):
     await message.author.send(f"邀請連結：{invite.url}")
     
 
-async def hi(message : discord.Member):
+async def test(message : discord.Member):
     """
     測試用,進行單次聊天不儲存記憶
     """
@@ -202,5 +202,5 @@ command_actions = {
     "顧問" : chat,
     "/inviteurl":inviteurl,
     "/setPass": setPass,
-    "/hi ": hi
+    "/test ": test
 }
