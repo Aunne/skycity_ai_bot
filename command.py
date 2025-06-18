@@ -29,6 +29,12 @@ async def chat( message:discord.Member ):
     # Check if the channels id is allowed
     if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in ALLOWED_CHANNELS):
         return
+    
+    # 如果遇到打招呼直接回覆這個節省效率
+    user_text = message.content
+    if user_text == "你好":
+        await message.channel.send("你好,有什麼可以幫助您的?")
+        return
 
     # 取得完整與玩家的對話
     conversation = db_session.query(
@@ -38,12 +44,6 @@ async def chat( message:discord.Member ):
     else:
         conversation_id = None
 
-    # 如果遇到打招呼直接回覆這個節省效率
-    user_text = message.content
-    if user_text == "你好":
-        await message.channel.send("你好,有什麼可以幫助您的?")
-        return
-    
     # 生成回應
     async with message.channel.typing():
         try:
@@ -109,6 +109,44 @@ async def inviteurl( message:discord.Member ):
     await message.author.send(f"邀請連結：{invite.url}")
     
 
+async def hi(message : discord.Member):
+    """
+    測試用,進行單次聊天不儲存記憶
+    """
+    # 取得對話頻道 id 
+    source_id = message.channel.id
+
+    # Check if the channels id is allowed
+    if (not LIMIT_SPEAKING_CHANNELS) or (source_id not in ALLOWED_CHANNELS):
+        return
+
+    # 如果遇到打招呼直接回覆這個節省效率
+    user_text = message.content
+    if user_text == "你好":
+        await message.channel.send("你好,有什麼可以幫助您的?")
+        return
+    
+    # 生成回應
+    async with message.channel.typing():
+        try:
+            result = chat_with_ai( source_id, user_text)
+        except HTTPError:
+            await message.channel.send("伺服器錯誤 等下再試")
+            return
+
+    # 檢查是否完成
+    if not isinstance(result, dict):
+        return
+
+    # 從結果中取得回答
+    ai_text = result.get("answer")
+    ai_text = ai_text.strip()
+
+    # 傳送回答
+    ai_text_length = len(ai_text)
+    for index in range(0, ai_text_length, 2000):
+        await message.channel.send(ai_text[index: index + 2000])
+    
 
 async def setPass( message:discord.Member ):
     """
@@ -163,5 +201,6 @@ async def command_check( message:discord.Member ):
 command_actions = {
     "顧問" : chat,
     "/inviteurl":inviteurl,
-    "/setPass": setPass
+    "/setPass": setPass,
+    "/hi ": hi
 }
