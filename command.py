@@ -98,7 +98,7 @@ async def inviteurl( message:discord.Member ):
     # 產生邀請
     invite = await message.channel.create_invite(
         max_uses=1,       # 只允許 1 次使用
-        max_age=0,        # 永不過期，單位為秒
+        max_age=60*60*24,        # 一天後過期，單位為秒
         unique=True       # 確保每次都新建連結
     )
     
