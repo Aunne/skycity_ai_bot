@@ -1,0 +1,35 @@
+pets:
+  categories:
+    - name: 商城寵物
+      aliases: [商寵, 商城寵]
+      valid_tiers: [1, 2, 3, 4, 5, 6]
+      growth_by_tier:
+        L1: 1.86
+        L2: 2.14
+        L3: 2.54
+        L4: 3.06
+        L5: 3.70
+        L6: 4.46
+      source: https://discord.com/channels/702041515072946197/709674735402745907/709675887678980178
+
+    - name: 道具店寵物
+      aliases: [道具寵, 道具店寵]
+      valid_tiers: [1, 2, 3, 4]
+      growth_by_tier:
+        L1: 1.46
+        L2: 1.86
+        L3: 2.14
+        L4: 2.66
+      source: https://discord.com/channels/702041515072946197/709674735402745907/709675887678980178
+
+  points_per_level:
+    "0": 3
+    "1": 5
+    "2": 8
+    "3": 12
+    "4": 15
+    "5": 20
+    "6": 28
+    "7": 38
+    "8": 50
+  points_source: https://discord.com/channels/702041515072946197/709674735402745907/709682602407100418

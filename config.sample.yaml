@@ -1,7 +1,14 @@
-SQLALCHEMY_DATABASE_URI: "sqlite:///data.db"
-SQLALCHEMY_TRACK_MODIFICATIONS: False
-DIFY_API_KEY: "your_dify_api_key"
 DISCORD_BOT_TOKEN: "your_discord_bot_token"
+DATABASE_PATH: "data.db"
 
-ALLOWED_CHANNELS : [ ALLOWED_CHANNEL_id1,ALLOWED_CHANNEL_id2 ... ]
-LIMIT_SPEAKING_CHANNELS : False # True will turn on it 
+OLLAMA_BASE_URL: "http://127.0.0.1:11434"
+OLLAMA_CHAT_MODEL: "qwen3.5:4b"
+OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
+
+# 放置遊戲攻略 .txt 文件的目錄；相對路徑會以專案根目錄為基準。
+KNOWLEDGE_DOCUMENTS_PATH: "knowledge/documents"
+KNOWLEDGE_TOP_K: 5
+MEMORY_MESSAGE_LIMIT: 12
+
+ALLOWED_CHANNELS: []
+LIMIT_SPEAKING_CHANNELS: false

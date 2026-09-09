@@ -2,7 +2,11 @@
 config.yaml
 data.db
 invite_log.txt
+bot.log
 __pycache__
+*.pyc
+.pytest_cache
 ./__pycache__/config.cpython-311.pyc
 ./__pycache__/dify.cpython-311.pyc
 ./__pycache__/command.cpython-311.pyc
+tests/
