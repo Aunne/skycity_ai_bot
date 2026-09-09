@@ -12,8 +12,9 @@ from .storage import KnowledgeIndexStore, StructuredKnowledgeStore
 
 
 _SOURCE_URL = re.compile(r"https?://[^\s]+")
-_POLICY_FILE = "機器人顧問守則.txt"
-_INDEX_EXCLUSIONS = {_POLICY_FILE, "目前知識庫版本.txt"}
+_POLICY_STEM = "機器人顧問守則"
+_INDEX_EXCLUDED_STEMS = {_POLICY_STEM, "目前知識庫版本"}
+_DOCUMENT_SUFFIXES = {".md", ".txt"}
 
 
 class GameKnowledge:
@@ -36,9 +37,10 @@ class GameKnowledge:
         self._structured_store.replace_from_mapping(structured)
 
     def system_policy(self) -> str:
-        policy_path = self._documents_path / _POLICY_FILE
-        if policy_path.exists():
-            return policy_path.read_text(encoding="utf-8-sig").strip()
+        for suffix in (".md", ".txt"):
+            policy_path = self._documents_path / f"{_POLICY_STEM}{suffix}"
+            if policy_path.exists():
+                return policy_path.read_text(encoding="utf-8-sig").strip()
         return (
             "你是天空之城遊戲顧問。只根據提供的知識內容與工具結果回答；"
             "資料不足時明確說知識庫沒有紀錄。不可把不同類別或等級的數值互相代用。"
@@ -70,7 +72,7 @@ class GameKnowledge:
         query_embedding = (await self._ollama.embed([f"search_query: {query}"]))[0]
         ranked = sorted(
             chunks,
-            key=lambda chunk: _cosine(query_embedding, chunk["embedding"]),
+            key=lambda chunk: _retrieval_score(query, query_embedding, chunk),
             reverse=True,
         )[:top_k]
 
@@ -219,8 +221,10 @@ class GameKnowledge:
 def _load_document_chunks(documents_path: Path) -> Iterable[dict[str, object]]:
     if not documents_path.exists():
         return
-    for path in sorted(documents_path.rglob("*.txt")):
-        if path.name in _INDEX_EXCLUSIONS:
+    for path in sorted(documents_path.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in _DOCUMENT_SUFFIXES:
+            continue
+        if path.stem in _INDEX_EXCLUDED_STEMS:
             continue
         text = path.read_text(encoding="utf-8-sig").strip()
         if not text:
@@ -241,6 +245,10 @@ def _chunk_text(text: str, target_chars: int = 1000) -> list[str]:
     current: list[str] = []
     current_size = 0
     for paragraph in paragraphs:
+        if paragraph.startswith("#") and current:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_size = 0
         if current and current_size + len(paragraph) > target_chars:
             chunks.append("\n\n".join(current))
             current = []
@@ -261,6 +269,36 @@ def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return -1.0
     return dot / (left_norm * right_norm)
+
+
+def _retrieval_score(
+    query: str,
+    query_embedding: Sequence[float],
+    chunk: dict[str, object],
+) -> float:
+    candidate = f"{chunk.get('document_name', '')}\n{chunk.get('content', '')}"
+    return _cosine(query_embedding, chunk["embedding"]) + _lexical_overlap(query, candidate)
+
+
+def _lexical_overlap(query: str, candidate: str) -> float:
+    normalized_query = _normalize_for_search(query)
+    normalized_candidate = _normalize_for_search(candidate)
+    weighted_matches = 0
+    weighted_total = 0
+    for size in (2, 3):
+        grams = {
+            normalized_query[index : index + size]
+            for index in range(len(normalized_query) - size + 1)
+        }
+        for gram in grams:
+            weighted_total += size
+            if gram in normalized_candidate:
+                weighted_matches += size
+    return weighted_matches / weighted_total if weighted_total else 0.0
+
+
+def _normalize_for_search(value: str) -> str:
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", value.lower())
 
 
 def _normalize(value: str) -> str:

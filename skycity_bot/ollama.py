@@ -24,6 +24,7 @@ class OllamaClient:
             "model": self._chat_model,
             "messages": list(messages),
             "stream": False,
+            "options": {"temperature": 0.1},
         }
         if tools:
             payload["tools"] = list(tools)

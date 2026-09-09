@@ -16,7 +16,7 @@ Discord
 
 複製 `config.sample.yaml` 為 `config.yaml`，填入 Discord Bot Token。舊設定中的 `DIFY_API_KEY` 已不再使用。
 
-將知識文件放進 `knowledge/documents`，或修改 `KNOWLEDGE_DOCUMENTS_PATH` 指向既有文件目錄。
+將 Markdown 知識文件放進 `knowledge/documents`，或修改 `KNOWLEDGE_DOCUMENTS_PATH` 指向既有文件目錄。索引器同時相容舊的 `.txt`，新文件建議使用 `.md`。
 
 ## 本地模型
 
