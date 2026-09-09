@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -156,6 +157,30 @@ def build_client(settings: Settings) -> discord.Client:
     return client
 
 
+async def rebuild_knowledge_index(settings: Settings) -> int:
+    """Refresh searchable documents before the Discord client accepts messages."""
+    database = Database(settings.database_path)
+    database.create_schema()
+    ollama = OllamaClient(
+        settings.ollama_base_url,
+        settings.chat_model,
+        settings.embedding_model,
+    )
+    try:
+        knowledge = GameKnowledge(
+            settings.knowledge_documents_path,
+            settings.structured_knowledge_path,
+            KnowledgeIndexStore(database),
+            StructuredKnowledgeStore(database),
+            ollama,
+        )
+        count = await knowledge.rebuild_index()
+        logger.info("Rebuilt %s knowledge chunks before Discord startup", count)
+        return count
+    finally:
+        database.close()
+
+
 def run() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -165,4 +190,5 @@ def run() -> None:
     settings = load_settings()
     if not settings.discord_token or settings.discord_token.startswith("your_"):
         raise ValueError("config.yaml 缺少有效的 DISCORD_BOT_TOKEN")
+    asyncio.run(rebuild_knowledge_index(settings))
     build_client(settings).run(settings.discord_token)
