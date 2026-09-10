@@ -1,9 +1,12 @@
 DISCORD_BOT_TOKEN: "your_discord_bot_token"
 DATABASE_PATH: "data.db"
 
-OLLAMA_BASE_URL: "http://127.0.0.1:11434"
-OLLAMA_CHAT_MODEL: "qwen3.5:4b"
+# Ollama Cloud 範例：聊天走雲端、embedding 留在本機。
+OLLAMA_BASE_URL: "https://ollama.com"
+OLLAMA_CHAT_MODEL: "gpt-oss:120b"
+OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
 OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
+OLLAMA_API_KEY: "在此填入你的 Ollama Cloud API Key"
 
 # 放置遊戲攻略 .txt 文件的目錄；相對路徑會以專案根目錄為基準。
 KNOWLEDGE_DOCUMENTS_PATH: "knowledge/documents"

@@ -123,6 +123,9 @@ def build_client(settings: Settings) -> discord.Client:
         settings.ollama_base_url,
         settings.chat_model,
         settings.embedding_model,
+        settings.ollama_api_key,
+        settings.embedding_base_url,
+        settings.embedding_api_key,
     )
     knowledge = GameKnowledge(
         settings.knowledge_documents_path,
@@ -165,6 +168,9 @@ async def rebuild_knowledge_index(settings: Settings) -> int:
         settings.ollama_base_url,
         settings.chat_model,
         settings.embedding_model,
+        settings.ollama_api_key,
+        settings.embedding_base_url,
+        settings.embedding_api_key,
     )
     try:
         knowledge = GameKnowledge(

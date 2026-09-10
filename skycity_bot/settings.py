@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,10 @@ class Settings:
     discord_token: str
     database_path: Path
     ollama_base_url: str
+    ollama_api_key: str
     chat_model: str
+    embedding_base_url: str
+    embedding_api_key: str
     embedding_model: str
     knowledge_documents_path: Path
     structured_knowledge_path: Path
@@ -49,11 +53,25 @@ def load_settings(config_path: str | Path = "config.yaml") -> Settings:
     if not database_path.is_absolute():
         database_path = project_root / database_path
 
+    ollama_base_url = str(raw.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")).rstrip("/")
+    embedding_base_url = str(
+        raw.get("OLLAMA_EMBEDDING_BASE_URL", ollama_base_url)
+    ).rstrip("/")
+    ollama_api_key = os.environ.get("OLLAMA_API_KEY", str(raw.get("OLLAMA_API_KEY", "")))
+    embedding_api_key = os.environ.get(
+        "OLLAMA_EMBEDDING_API_KEY", str(raw.get("OLLAMA_EMBEDDING_API_KEY", ""))
+    )
+    if not embedding_api_key and embedding_base_url == ollama_base_url:
+        embedding_api_key = ollama_api_key
+
     return Settings(
         discord_token=str(raw.get("DISCORD_BOT_TOKEN", "")),
         database_path=database_path,
-        ollama_base_url=str(raw.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")).rstrip("/"),
+        ollama_base_url=ollama_base_url,
+        ollama_api_key=ollama_api_key,
         chat_model=str(raw.get("OLLAMA_CHAT_MODEL", "qwen3.5:4b")),
+        embedding_base_url=embedding_base_url,
+        embedding_api_key=embedding_api_key,
         embedding_model=str(raw.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text-v2-moe")),
         knowledge_documents_path=documents_path,
         structured_knowledge_path=project_root / "knowledge" / "structured.yaml",

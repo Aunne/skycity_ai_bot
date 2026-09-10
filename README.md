@@ -25,6 +25,36 @@ ollama pull qwen3.5:4b
 ollama pull nomic-embed-text-v2-moe
 ```
 
+## Ollama Cloud 聊天模型
+
+聊天模型可改由 Ollama Cloud 執行，而文件 embedding 維持使用本機 Ollama。將下列設定加入 `config.yaml`，並將 API Key 替換為自己的值：
+
+```yaml
+OLLAMA_BASE_URL: "https://ollama.com"
+OLLAMA_API_KEY: "你的 Ollama Cloud API Key"
+OLLAMA_CHAT_MODEL: "gpt-oss:120b"
+
+OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
+OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
+```
+
+此配置需要本機 Ollama 保留 `nomic-embed-text-v2-moe`，因為 Bot 每次啟動都會用它重建搜尋索引。聊天回答則交由 Ollama Cloud，不需要本機 GPU。
+
+## Ollama Cloud 聊天模型
+
+聊天模型可改由 Ollama Cloud 執行，而文件 embedding 維持使用本機 Ollama。將下列設定加入 `config.yaml`，並將 API Key 替換為自己的值：
+
+```yaml
+OLLAMA_BASE_URL: "https://ollama.com"
+OLLAMA_API_KEY: "你的 Ollama Cloud API Key"
+OLLAMA_CHAT_MODEL: "gpt-oss:120b"
+
+OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
+OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
+```
+
+此配置需要本機 Ollama 保留 `nomic-embed-text-v2-moe`，因為 Bot 每次啟動都會用它重建搜尋索引。聊天回答則交由 Ollama Cloud，不需要本機 GPU。
+
 ## 安裝與建立語意索引
 
 ```cmd

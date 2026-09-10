@@ -19,6 +19,9 @@ async def ask(question: str) -> str:
             settings.ollama_base_url,
             settings.chat_model,
             settings.embedding_model,
+            settings.ollama_api_key,
+            settings.embedding_base_url,
+            settings.embedding_api_key,
         )
         knowledge = GameKnowledge(
             settings.knowledge_documents_path,
