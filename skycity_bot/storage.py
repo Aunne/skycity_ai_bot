@@ -65,6 +65,15 @@ class PetPointRateRow(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CurrencyExchangeRateRow(Base):
+    __tablename__ = "currency_exchange_rates"
+
+    from_currency: Mapped[str] = mapped_column(String(16), primary_key=True)
+    to_currency: Mapped[str] = mapped_column(String(16), primary_key=True)
+    rate: Mapped[float] = mapped_column(Float)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class Database:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,10 +188,13 @@ class StructuredKnowledgeStore:
         categories = pets.get("categories", [])
         rates = pets.get("points_per_level", {})
         points_source = pets.get("points_source")
+        exchange = data.get("currency_exchange", {})
+        exchange_rates = exchange.get("rates", []) if isinstance(exchange, dict) else []
         with self._database.session() as session:
             session.execute(delete(PetGrowthRow))
             session.execute(delete(PetCategoryRow))
             session.execute(delete(PetPointRateRow))
+            session.execute(delete(CurrencyExchangeRateRow))
 
             for category in categories:
                 if not isinstance(category, dict):
@@ -217,6 +229,23 @@ class StructuredKnowledgeStore:
                         )
                     )
 
+            if isinstance(exchange_rates, list):
+                for exchange_rate in exchange_rates:
+                    if not isinstance(exchange_rate, dict):
+                        continue
+                    session.add(
+                        CurrencyExchangeRateRow(
+                            from_currency=str(exchange_rate["from_currency"]).lower(),
+                            to_currency=str(exchange_rate["to_currency"]).lower(),
+                            rate=float(exchange_rate["rate"]),
+                            source_url=(
+                                str(exchange_rate["source"])
+                                if exchange_rate.get("source")
+                                else None
+                            ),
+                        )
+                    )
+
     def pet_categories(self) -> list[dict[str, object]]:
         with self._database.session() as session:
             categories = session.scalars(select(PetCategoryRow)).all()
@@ -245,3 +274,23 @@ class StructuredKnowledgeStore:
                 "points_per_level": row.points_per_level,
                 "source": row.source_url,
             }
+
+    def currency_exchange_rate(
+        self, from_currency: str, to_currency: str
+    ) -> dict[str, object] | None:
+        from_currency = from_currency.lower()
+        to_currency = to_currency.lower()
+        with self._database.session() as session:
+            direct = session.get(
+                CurrencyExchangeRateRow,
+                {"from_currency": from_currency, "to_currency": to_currency},
+            )
+            if direct is not None:
+                return {"rate": direct.rate, "source": direct.source_url}
+            reverse = session.get(
+                CurrencyExchangeRateRow,
+                {"from_currency": to_currency, "to_currency": from_currency},
+            )
+            if reverse is None:
+                return None
+            return {"rate": 1 / reverse.rate, "source": reverse.source_url}

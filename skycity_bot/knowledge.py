@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -91,6 +92,9 @@ class GameKnowledge:
 
     def exact_answer(self, question: str) -> str | None:
         """Answer recognized factual combinations without asking the language model to infer them."""
+        currency_answer = self._exact_currency_answer(question)
+        if currency_answer is not None:
+            return currency_answer
         if "成長" not in question:
             return None
         tier_match = re.search(r"[LlＬｌ]\s*(\d+)", question)
@@ -117,6 +121,44 @@ class GameKnowledge:
                     f"{result['maximum_growth']}。{source_line}"
                 )
         return None
+
+    def _exact_currency_answer(self, question: str) -> str | None:
+        amount_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*(台幣|台币|人民幣|人民币|天空石|統御|统御|星幣|星币|tks|ty|xb|[tr])",
+            question,
+            flags=re.IGNORECASE,
+        )
+        if amount_match is None:
+            return None
+
+        source_currency = _normalize_currency(amount_match.group(2))
+        if source_currency is None:
+            return None
+        target_currency = None
+        for token in re.finditer(
+            r"台幣|台币|人民幣|人民币|天空石|統御|统御|星幣|星币|tks|ty|xb|[tr]",
+            question,
+            flags=re.IGNORECASE,
+        ):
+            if token.start() == amount_match.start(2):
+                continue
+            candidate = _normalize_currency(token.group())
+            if candidate and candidate != source_currency:
+                target_currency = candidate
+                break
+        if target_currency is None:
+            return None
+
+        result = self._convert_currency(
+            amount_match.group(1), source_currency, target_currency
+        )
+        if result["status"] != "found":
+            return None
+        return (
+            f"{_format_decimal(Decimal(amount_match.group(1)))} {source_currency} = "
+            f"{result['converted_amount']} {target_currency}。"
+            f"換算：{result['formula']}。來源：{result['source']}"
+        )
 
     def tools(self) -> list[dict[str, Any]]:
         return [
@@ -156,6 +198,48 @@ class GameKnowledge:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "convert_currency",
+                    "description": "依市場價格的結構化匯率換算貨幣。不得自行乘除或猜測匯率方向；凡是 xb、T、R、tks、ty 的換算都必須呼叫此工具。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "amount": {"type": "number", "description": "要換算的金額"},
+                            "from_currency": {"type": "string", "description": "原貨幣：T、R、xb、tks 或 ty"},
+                            "to_currency": {"type": "string", "description": "目標貨幣：T、R、xb、tks 或 ty"},
+                        },
+                        "required": ["amount", "from_currency", "to_currency"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "calculate_total_cost",
+                    "description": "將多筆已知成本換算並加總為同一貨幣。所有成本估算都必須使用此工具，不能自行加總或換算。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "amount": {"type": "number"},
+                                        "currency": {"type": "string"},
+                                        "label": {"type": "string"},
+                                    },
+                                    "required": ["amount", "currency"],
+                                },
+                            },
+                            "target_currency": {"type": "string", "description": "合計的目標貨幣"},
+                        },
+                        "required": ["items", "target_currency"],
+                    },
+                },
+            },
         ]
 
     def execute_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -163,7 +247,90 @@ class GameKnowledge:
             return self._get_pet_growth(str(arguments.get("pet_type", "")), arguments.get("tier"))
         if name == "calculate_pet_available_points":
             return self._calculate_pet_points(arguments.get("rebirth"), arguments.get("levels_gained"))
+        if name == "convert_currency":
+            return self._convert_currency(
+                arguments.get("amount"),
+                str(arguments.get("from_currency", "")),
+                str(arguments.get("to_currency", "")),
+            )
+        if name == "calculate_total_cost":
+            return self._calculate_total_cost(
+                arguments.get("items"), str(arguments.get("target_currency", ""))
+            )
         return {"status": "unknown_tool", "tool": name}
+
+    def _convert_currency(
+        self, amount_value: Any, from_currency_value: str, to_currency_value: str
+    ) -> dict[str, object]:
+        try:
+            amount = Decimal(str(amount_value))
+        except (InvalidOperation, ValueError):
+            return {"status": "invalid_argument", "argument": "amount"}
+        from_currency = _normalize_currency(from_currency_value)
+        to_currency = _normalize_currency(to_currency_value)
+        if from_currency is None or to_currency is None or amount < 0:
+            return {"status": "invalid_argument"}
+        if from_currency == to_currency:
+            return {
+                "status": "found",
+                "converted_amount": _format_decimal(amount),
+                "formula": f"{_format_decimal(amount)} {from_currency}",
+                "source": "同一貨幣無須換算",
+            }
+        rate_info = self._structured_store.currency_exchange_rate(
+            from_currency, to_currency
+        )
+        if rate_info is None:
+            return {
+                "status": "unknown_exchange_rate",
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+            }
+        rate = Decimal(str(rate_info["rate"]))
+        converted = amount * rate
+        return {
+            "status": "found",
+            "from_currency": from_currency,
+            "to_currency": to_currency,
+            "converted_amount": _format_decimal(converted),
+            "formula": (
+                f"{_format_decimal(amount)} {from_currency} × "
+                f"{_format_decimal(rate)} = {_format_decimal(converted)} {to_currency}"
+            ),
+            "source": rate_info.get("source"),
+        }
+
+    def _calculate_total_cost(
+        self, items_value: Any, target_currency_value: str
+    ) -> dict[str, object]:
+        target_currency = _normalize_currency(target_currency_value)
+        if not isinstance(items_value, list) or target_currency is None:
+            return {"status": "invalid_argument"}
+        converted_items: list[dict[str, object]] = []
+        total = Decimal("0")
+        for item in items_value:
+            if not isinstance(item, dict):
+                return {"status": "invalid_argument", "argument": "items"}
+            result = self._convert_currency(
+                item.get("amount"), str(item.get("currency", "")), target_currency
+            )
+            if result["status"] != "found":
+                return result
+            total += Decimal(str(result["converted_amount"]))
+            converted_items.append(
+                {
+                    "label": str(item.get("label", "")),
+                    "converted_amount": result["converted_amount"],
+                    "currency": target_currency,
+                    "formula": result["formula"],
+                }
+            )
+        return {
+            "status": "found",
+            "target_currency": target_currency,
+            "total": _format_decimal(total),
+            "items": converted_items,
+        }
 
     def _get_pet_growth(self, pet_type: str, tier_value: Any) -> dict[str, Any]:
         try:
@@ -303,3 +470,28 @@ def _normalize_for_search(value: str) -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"[\s_-]", "", value).lower()
+
+
+def _normalize_currency(value: str) -> str | None:
+    aliases = {
+        "t": "T",
+        "台幣": "T",
+        "台币": "T",
+        "r": "R",
+        "人民幣": "R",
+        "人民币": "R",
+        "xb": "xb",
+        "星幣": "xb",
+        "星币": "xb",
+        "tks": "tks",
+        "天空石": "tks",
+        "ty": "ty",
+        "統御": "ty",
+        "统御": "ty",
+    }
+    return aliases.get(value.strip().lower())
+
+
+def _format_decimal(value: Decimal) -> str:
+    rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return format(rounded, "f").rstrip("0").rstrip(".")

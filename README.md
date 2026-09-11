@@ -64,6 +64,10 @@ OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
 
 文件內容異動後，重新執行索引命令。結構化寵物規則放在 `knowledge/structured.yaml`，不經向量搜尋。
 
+固定匯率與成本換算也放在 `knowledge/structured.yaml`。例如市場價格的 `1 T = 2.7 xb` 會由程式以 `xb ÷ 2.7 = T` 計算；Bot 不會自行判斷匯率方向。更新匯率後重啟 Bot 即會同步結構化資料並重建索引。
+
+固定匯率與成本換算也放在 `knowledge/structured.yaml`。例如市場價格的 `1 T = 2.7 xb` 會由程式以 `xb ÷ 2.7 = T` 計算；Bot 不會自行判斷匯率方向。更新匯率後重啟 Bot 即會同步結構化資料並重建索引。
+
 ## 執行
 
 ```cmd

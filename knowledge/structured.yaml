@@ -33,3 +33,23 @@ pets:
     "7": 38
     "8": 50
   points_source: https://discord.com/channels/702041515072946197/709674735402745907/709682602407100418
+
+currency_exchange:
+  rates:
+    # rate 的意義為：1 from_currency = rate to_currency。
+    - from_currency: T
+      to_currency: xb
+      rate: 2.7
+      source: https://discord.com/channels/702041515072946197/702164547695411270
+    - from_currency: R
+      to_currency: xb
+      rate: 12.5
+      source: https://discord.com/channels/702041515072946197/702164547695411270
+    - from_currency: R
+      to_currency: tks
+      rate: 40000000
+      source: https://discord.com/channels/702041515072946197/702164547695411270
+    - from_currency: ty
+      to_currency: tks
+      rate: 1000
+      source: https://discord.com/channels/702041515072946197/702164547695411270
