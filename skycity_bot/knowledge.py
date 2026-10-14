@@ -17,7 +17,8 @@ _SUFFIXES = {".md", ".txt"}
 _EXCLUDED = {"機器人顧問守則", "目前知識庫版本"}
 _HEADING = re.compile(r"^(#{1,6})\s+(.+)$")
 _IDENTIFIER = re.compile(r"(?<![a-zA-Z0-9])(?:[a-zA-Z]+\d+|\d+[a-zA-Z]+)(?![a-zA-Z0-9])")
-_NUMBER = re.compile(r"(?<![a-zA-Z0-9])\d+(?:\.\d+)?(?![a-zA-Z0-9])")
+_NUMBER = re.compile(r"(?<![a-zA-Z0-9])(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?(?![a-zA-Z0-9])")
+_NUMBER_UNIT = re.compile(r"(?<![a-zA-Z0-9])(\d{1,3}(?:[,，]\d{3})+|\d+)(?:\s*)(XB|TKS|TY|台幣)", re.IGNORECASE)
 
 
 def _terms(text: str) -> set[str]:
@@ -175,6 +176,56 @@ class GameKnowledge:
         logger.info("查詢=%r；候選=%s", query, [(b["id"], b["score"]) for b in result])
         return result
 
+    def section_outline(self, document_ids: list[str], limit: int = 50) -> list[str]:
+        """Expose existing document headings to guide abstract question searches."""
+        wanted = set(document_ids)
+        seen: set[tuple[str, str]] = set()
+        outline: list[str] = []
+        for block in self._index.iter_blocks():
+            document_id = str(block["document_id"])
+            heading = str(block["heading"])
+            key = (document_id, heading)
+            if document_id not in wanted or not heading or key in seen:
+                continue
+            seen.add(key)
+            outline.append(f"{document_id}：{heading}")
+            if len(outline) == limit:
+                break
+        return outline
+
+    def related_blocks(self, document_id: str, query: str, limit: int = 5) -> list[dict[str, object]]:
+        """Scan a promising document for repeated question terms, including answer units."""
+        terms = _terms(query)
+        scored: list[tuple[int, dict[str, object]]] = []
+        for block in self._index.iter_blocks():
+            if block["document_id"] != document_id:
+                continue
+            content = str(block["content"]).casefold()
+            heading = str(block["heading"]).casefold()
+            score = sum(min(3, content.count(term)) + int(term in heading) for term in terms)
+            if score:
+                scored.append((score, block))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [block for _, block in scored[:limit]]
+
+    def heading_matches(self, query: str, limit: int = 3) -> list[dict[str, object]]:
+        """Read sections whose own heading directly matches a broad player question."""
+        terms = _terms(query)
+        scored: list[tuple[int, int, dict[str, object]]] = []
+        seen: set[tuple[str, str]] = set()
+        for block in self._index.iter_blocks():
+            heading = str(block["heading"]).split(" › ")[-1]
+            key = (str(block["document_id"]), str(block["section_id"]))
+            if not heading or key in seen:
+                continue
+            seen.add(key)
+            overlap = _terms(heading) & terms
+            score = sum(2 if len(term) == 3 else 1 for term in overlap)
+            if score >= 5:
+                scored.append((score, len(overlap), block))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [block for _, _, block in scored[:limit]]
+
     def read_section(self, document_id: str, section_id: str, cursor: int = 0, char_budget: int = 5000) -> dict[str, object]:
         blocks = self._index.read_section(document_id, section_id)
         output: list[dict[str, object]] = []
@@ -225,7 +276,14 @@ class GameKnowledge:
 
     @staticmethod
     def numbers(text: str) -> set[str]:
-        return {match.group() for match in _NUMBER.finditer(text)}
+        return {match.group().replace(",", "").replace("，", "") for match in _NUMBER.finditer(text)}
+
+    @staticmethod
+    def number_units(text: str) -> set[tuple[str, str]]:
+        return {
+            (match.group(1).replace(",", "").replace("，", ""), match.group(2).upper())
+            for match in _NUMBER_UNIT.finditer(text)
+        }
 
     @staticmethod
     def table_rows(block: dict[str, object]) -> list[list[str]] | None:
