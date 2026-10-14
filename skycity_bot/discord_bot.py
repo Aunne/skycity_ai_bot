@@ -9,7 +9,7 @@ from .assistant import AnswerRequest, SkyCityAssistant
 from .knowledge import GameKnowledge
 from .ollama import OllamaClient, OllamaError
 from .settings import Settings, load_settings
-from .storage import Database, KnowledgeIndexStore, MemoryStore, StructuredKnowledgeStore
+from .storage import Database, KnowledgeIndexStore, MemoryStore
 
 
 logger = logging.getLogger(__name__)
@@ -129,10 +129,9 @@ def build_client(settings: Settings) -> discord.Client:
     )
     knowledge = GameKnowledge(
         settings.knowledge_documents_path,
-        settings.structured_knowledge_path,
         KnowledgeIndexStore(database),
-        StructuredKnowledgeStore(database),
         ollama,
+        settings.embedding_model,
     )
     assistant = SkyCityAssistant(
         ollama,
@@ -140,6 +139,7 @@ def build_client(settings: Settings) -> discord.Client:
         MemoryStore(database),
         settings.memory_message_limit,
         settings.knowledge_top_k,
+        settings.knowledge_context_chars,
     )
     router = DiscordCommandRouter(settings, assistant)
 
@@ -175,10 +175,9 @@ async def rebuild_knowledge_index(settings: Settings) -> int:
     try:
         knowledge = GameKnowledge(
             settings.knowledge_documents_path,
-            settings.structured_knowledge_path,
             KnowledgeIndexStore(database),
-            StructuredKnowledgeStore(database),
             ollama,
+            settings.embedding_model,
         )
         count = await knowledge.rebuild_index()
         logger.info("Rebuilt %s knowledge chunks before Discord startup", count)

@@ -1,497 +1,234 @@
 from __future__ import annotations
 
+import hashlib
+import heapq
+import logging
 import math
 import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any, Iterable, Sequence
-
-import yaml
+from typing import Any, Iterator, Sequence
 
 from .ollama import OllamaClient
-from .storage import KnowledgeIndexStore, StructuredKnowledgeStore
+from .storage import KnowledgeIndexStore
 
 
-_SOURCE_URL = re.compile(r"https?://[^\s]+")
-_POLICY_STEM = "機器人顧問守則"
-_INDEX_EXCLUDED_STEMS = {_POLICY_STEM, "目前知識庫版本"}
-_DOCUMENT_SUFFIXES = {".md", ".txt"}
+logger = logging.getLogger(__name__)
+_SUFFIXES = {".md", ".txt"}
+_EXCLUDED = {"機器人顧問守則", "目前知識庫版本"}
+_HEADING = re.compile(r"^(#{1,6})\s+(.+)$")
+_IDENTIFIER = re.compile(r"(?<![a-zA-Z0-9])(?:[a-zA-Z]+\d+|\d+[a-zA-Z]+)(?![a-zA-Z0-9])")
+_NUMBER = re.compile(r"(?<![a-zA-Z0-9])\d+(?:\.\d+)?(?![a-zA-Z0-9])")
 
 
-class GameKnowledge:
-    """Structured facts and semantic documents behind one query interface."""
-
-    def __init__(
-        self,
-        documents_path: Path,
-        structured_path: Path,
-        index_store: KnowledgeIndexStore,
-        structured_store: StructuredKnowledgeStore,
-        ollama: OllamaClient,
-    ):
-        self._documents_path = documents_path
-        self._index_store = index_store
-        self._structured_store = structured_store
-        self._ollama = ollama
-        with structured_path.open("r", encoding="utf-8") as file:
-            structured: dict[str, Any] = yaml.safe_load(file) or {}
-        self._structured_store.replace_from_mapping(structured)
-
-    def system_policy(self) -> str:
-        for suffix in (".md", ".txt"):
-            policy_path = self._documents_path / f"{_POLICY_STEM}{suffix}"
-            if policy_path.exists():
-                return policy_path.read_text(encoding="utf-8-sig").strip()
-        return (
-            "你是天空之城遊戲顧問。只根據提供的知識內容與工具結果回答；"
-            "資料不足時明確說知識庫沒有紀錄。不可把不同類別或等級的數值互相代用。"
-        )
-
-    async def rebuild_index(self) -> int:
-        chunks = list(_load_document_chunks(self._documents_path))
-        if not chunks:
-            self._index_store.replace([])
-            return 0
-
-        embeddings: list[list[float]] = []
-        for start in range(0, len(chunks), 16):
-            texts = [f"search_document: {chunk['content']}" for chunk in chunks[start : start + 16]]
-            embeddings.extend(await self._ollama.embed(texts))
-
-        if len(embeddings) != len(chunks):
-            raise RuntimeError("Embedding 數量與文件切塊數量不一致")
-
-        indexed = [dict(chunk, embedding=embedding) for chunk, embedding in zip(chunks, embeddings)]
-        self._index_store.replace(indexed)
-        return len(indexed)
-
-    async def semantic_context(self, query: str, top_k: int) -> str:
-        chunks = self._index_store.all()
-        if not chunks:
-            return ""
-
-        query_embedding = (await self._ollama.embed([f"search_query: {query}"]))[0]
-        ranked = sorted(
-            chunks,
-            key=lambda chunk: _retrieval_score(query, query_embedding, chunk),
-            reverse=True,
-        )[:top_k]
-
-        sections: list[str] = []
-        total_characters = 0
-        for chunk in ranked:
-            source = str(chunk["document_name"])
-            if chunk.get("source_url"):
-                source = f"{source} — {chunk['source_url']}"
-            section = f"[來源：{source}]\n{chunk['content']}"
-            if sections and total_characters + len(section) > 3500:
-                break
-            sections.append(section)
-            total_characters += len(section)
-        return "\n\n".join(sections)
-
-    def exact_answer(self, question: str) -> str | None:
-        """Answer recognized factual combinations without asking the language model to infer them."""
-        currency_answer = self._exact_currency_answer(question)
-        if currency_answer is not None:
-            return currency_answer
-        if "成長" not in question:
-            return None
-        tier_match = re.search(r"[LlＬｌ]\s*(\d+)", question)
-        if tier_match is None:
-            return None
-
-        normalized_question = _normalize(question)
-        for category in self._structured_store.pet_categories():
-            names = [category.get("name", ""), *category.get("aliases", [])]
-            if not any(_normalize(str(name)) in normalized_question for name in names):
-                continue
-
-            result = self._get_pet_growth(str(category["name"]), int(tier_match.group(1)))
-            source = result.get("source")
-            source_line = f"\n來源：{source}" if source else ""
-            if result["status"] == "invalid_tier":
-                return (
-                    f"{result['pet_type']}最高只有 L{result['maximum_tier']}，不存在 "
-                    f"L{result['requested_tier']}，因此沒有該等級的最高成長值。{source_line}"
-                )
-            if result["status"] == "found":
-                return (
-                    f"{result['pet_type']} L{result['tier']} 的最高成長值是 "
-                    f"{result['maximum_growth']}。{source_line}"
-                )
-        return None
-
-    def _exact_currency_answer(self, question: str) -> str | None:
-        amount_match = re.search(
-            r"(\d+(?:\.\d+)?)\s*(台幣|台币|人民幣|人民币|天空石|統御|统御|星幣|星币|tks|ty|xb|[tr])",
-            question,
-            flags=re.IGNORECASE,
-        )
-        if amount_match is None:
-            return None
-
-        source_currency = _normalize_currency(amount_match.group(2))
-        if source_currency is None:
-            return None
-        target_currency = None
-        for token in re.finditer(
-            r"台幣|台币|人民幣|人民币|天空石|統御|统御|星幣|星币|tks|ty|xb|[tr]",
-            question,
-            flags=re.IGNORECASE,
-        ):
-            if token.start() == amount_match.start(2):
-                continue
-            candidate = _normalize_currency(token.group())
-            if candidate and candidate != source_currency:
-                target_currency = candidate
-                break
-        if target_currency is None:
-            return None
-
-        result = self._convert_currency(
-            amount_match.group(1), source_currency, target_currency
-        )
-        if result["status"] != "found":
-            return None
-        return (
-            f"{_format_decimal(Decimal(amount_match.group(1)))} {source_currency} = "
-            f"{result['converted_amount']} {target_currency}。"
-            f"換算：{result['formula']}。來源：{result['source']}"
-        )
-
-    def tools(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_pet_growth",
-                    "description": "查詢指定類型與 L 等級寵物的最高成長值，並驗證該組合是否存在。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "pet_type": {
-                                "type": "string",
-                                "description": "寵物類型，例如商寵、商城寵物、道具寵。",
-                            },
-                            "tier": {
-                                "type": "integer",
-                                "description": "寵物的 L 等級數字，例如 L4 傳入 4。",
-                            },
-                        },
-                        "required": ["pet_type", "tier"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "calculate_pet_available_points",
-                    "description": "依據寵物取得經驗時的轉數與升級數，計算新增可用點。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "rebirth": {"type": "integer", "description": "經驗轉數，0 到 8。"},
-                            "levels_gained": {"type": "integer", "description": "提升的寵物等級數。"},
-                        },
-                        "required": ["rebirth", "levels_gained"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "convert_currency",
-                    "description": "依市場價格的結構化匯率換算貨幣。不得自行乘除或猜測匯率方向；凡是 xb、T、R、tks、ty 的換算都必須呼叫此工具。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "amount": {"type": "number", "description": "要換算的金額"},
-                            "from_currency": {"type": "string", "description": "原貨幣：T、R、xb、tks 或 ty"},
-                            "to_currency": {"type": "string", "description": "目標貨幣：T、R、xb、tks 或 ty"},
-                        },
-                        "required": ["amount", "from_currency", "to_currency"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "calculate_total_cost",
-                    "description": "將多筆已知成本換算並加總為同一貨幣。所有成本估算都必須使用此工具，不能自行加總或換算。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "items": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "amount": {"type": "number"},
-                                        "currency": {"type": "string"},
-                                        "label": {"type": "string"},
-                                    },
-                                    "required": ["amount", "currency"],
-                                },
-                            },
-                            "target_currency": {"type": "string", "description": "合計的目標貨幣"},
-                        },
-                        "required": ["items", "target_currency"],
-                    },
-                },
-            },
-        ]
-
-    def execute_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if name == "get_pet_growth":
-            return self._get_pet_growth(str(arguments.get("pet_type", "")), arguments.get("tier"))
-        if name == "calculate_pet_available_points":
-            return self._calculate_pet_points(arguments.get("rebirth"), arguments.get("levels_gained"))
-        if name == "convert_currency":
-            return self._convert_currency(
-                arguments.get("amount"),
-                str(arguments.get("from_currency", "")),
-                str(arguments.get("to_currency", "")),
-            )
-        if name == "calculate_total_cost":
-            return self._calculate_total_cost(
-                arguments.get("items"), str(arguments.get("target_currency", ""))
-            )
-        return {"status": "unknown_tool", "tool": name}
-
-    def _convert_currency(
-        self, amount_value: Any, from_currency_value: str, to_currency_value: str
-    ) -> dict[str, object]:
-        try:
-            amount = Decimal(str(amount_value))
-        except (InvalidOperation, ValueError):
-            return {"status": "invalid_argument", "argument": "amount"}
-        from_currency = _normalize_currency(from_currency_value)
-        to_currency = _normalize_currency(to_currency_value)
-        if from_currency is None or to_currency is None or amount < 0:
-            return {"status": "invalid_argument"}
-        if from_currency == to_currency:
-            return {
-                "status": "found",
-                "converted_amount": _format_decimal(amount),
-                "formula": f"{_format_decimal(amount)} {from_currency}",
-                "source": "同一貨幣無須換算",
-            }
-        rate_info = self._structured_store.currency_exchange_rate(
-            from_currency, to_currency
-        )
-        if rate_info is None:
-            return {
-                "status": "unknown_exchange_rate",
-                "from_currency": from_currency,
-                "to_currency": to_currency,
-            }
-        rate = Decimal(str(rate_info["rate"]))
-        converted = amount * rate
-        return {
-            "status": "found",
-            "from_currency": from_currency,
-            "to_currency": to_currency,
-            "converted_amount": _format_decimal(converted),
-            "formula": (
-                f"{_format_decimal(amount)} {from_currency} × "
-                f"{_format_decimal(rate)} = {_format_decimal(converted)} {to_currency}"
-            ),
-            "source": rate_info.get("source"),
-        }
-
-    def _calculate_total_cost(
-        self, items_value: Any, target_currency_value: str
-    ) -> dict[str, object]:
-        target_currency = _normalize_currency(target_currency_value)
-        if not isinstance(items_value, list) or target_currency is None:
-            return {"status": "invalid_argument"}
-        converted_items: list[dict[str, object]] = []
-        total = Decimal("0")
-        for item in items_value:
-            if not isinstance(item, dict):
-                return {"status": "invalid_argument", "argument": "items"}
-            result = self._convert_currency(
-                item.get("amount"), str(item.get("currency", "")), target_currency
-            )
-            if result["status"] != "found":
-                return result
-            total += Decimal(str(result["converted_amount"]))
-            converted_items.append(
-                {
-                    "label": str(item.get("label", "")),
-                    "converted_amount": result["converted_amount"],
-                    "currency": target_currency,
-                    "formula": result["formula"],
-                }
-            )
-        return {
-            "status": "found",
-            "target_currency": target_currency,
-            "total": _format_decimal(total),
-            "items": converted_items,
-        }
-
-    def _get_pet_growth(self, pet_type: str, tier_value: Any) -> dict[str, Any]:
-        try:
-            tier = int(tier_value)
-        except (TypeError, ValueError):
-            return {"status": "invalid_argument", "argument": "tier"}
-
-        normalized = _normalize(pet_type)
-        categories = self._structured_store.pet_categories()
-        for category in categories:
-            names = [category.get("name", ""), *category.get("aliases", [])]
-            if normalized not in {_normalize(str(name)) for name in names}:
-                continue
-
-            valid_tiers = [int(value) for value in category.get("valid_tiers", [])]
-            if tier not in valid_tiers:
-                return {
-                    "status": "invalid_tier",
-                    "pet_type": category["name"],
-                    "requested_tier": tier,
-                    "valid_tiers": valid_tiers,
-                    "maximum_tier": max(valid_tiers) if valid_tiers else None,
-                    "source": category.get("source"),
-                }
-            growth = category.get("growth_by_tier", {}).get(tier)
-            return {
-                "status": "found",
-                "pet_type": category["name"],
-                "tier": tier,
-                "maximum_growth": growth,
-                "source": category.get("source"),
-            }
-        return {"status": "unknown_pet_type", "pet_type": pet_type}
-
-    def _calculate_pet_points(self, rebirth_value: Any, levels_value: Any) -> dict[str, Any]:
-        try:
-            rebirth = int(rebirth_value)
-            levels = int(levels_value)
-        except (TypeError, ValueError):
-            return {"status": "invalid_argument"}
-        rate = self._structured_store.pet_point_rate(rebirth)
-        if rate is None or levels < 0:
-            return {"status": "invalid_argument", "rebirth": rebirth, "levels_gained": levels}
-        per_level = int(rate["points_per_level"])
-        return {
-            "status": "calculated",
-            "rebirth": rebirth,
-            "levels_gained": levels,
-            "points_per_level": int(per_level),
-            "available_points": int(per_level) * levels,
-            "source": rate.get("source"),
-        }
-
-
-def _load_document_chunks(documents_path: Path) -> Iterable[dict[str, object]]:
-    if not documents_path.exists():
-        return
-    for path in sorted(documents_path.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in _DOCUMENT_SUFFIXES:
-            continue
-        if path.stem in _INDEX_EXCLUDED_STEMS:
-            continue
-        text = path.read_text(encoding="utf-8-sig").strip()
-        if not text:
-            continue
-        urls = _SOURCE_URL.findall(text)
-        for index, content in enumerate(_chunk_text(text)):
-            yield {
-                "document_name": path.name,
-                "chunk_index": index,
-                "content": f"[文件：{path.stem}]\n{content}",
-                "source_url": urls[-1].rstrip(").,，") if urls else None,
-            }
-
-
-def _chunk_text(text: str, target_chars: int = 1000) -> list[str]:
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
-    chunks: list[str] = []
-    current: list[str] = []
-    current_size = 0
-    for paragraph in paragraphs:
-        if paragraph.startswith("#") and current:
-            chunks.append("\n\n".join(current))
-            current = []
-            current_size = 0
-        if current and current_size + len(paragraph) > target_chars:
-            chunks.append("\n\n".join(current))
-            current = []
-            current_size = 0
-        current.append(paragraph)
-        current_size += len(paragraph)
-    if current:
-        chunks.append("\n\n".join(current))
-    return chunks
+def _terms(text: str) -> set[str]:
+    normalized = text.casefold()
+    words = set(re.findall(r"[a-z]+\d*|\d+(?:\.\d+)?", normalized))
+    for run in re.findall(r"[\u3400-\u9fff]+", normalized):
+        words.update(run[i:i + 2] for i in range(len(run) - 1))
+        words.update(run[i:i + 3] for i in range(len(run) - 2))
+    return words
 
 
 def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
     if len(left) != len(right) or not left:
-        return -1.0
-    dot = sum(a * b for a, b in zip(left, right))
-    left_norm = math.sqrt(sum(value * value for value in left))
-    right_norm = math.sqrt(sum(value * value for value in right))
-    if left_norm == 0 or right_norm == 0:
-        return -1.0
-    return dot / (left_norm * right_norm)
+        return 0.0
+    denominator = math.sqrt(sum(x * x for x in left) * sum(x * x for x in right))
+    return sum(a * b for a, b in zip(left, right)) / denominator if denominator else 0.0
 
 
-def _retrieval_score(
-    query: str,
-    query_embedding: Sequence[float],
-    chunk: dict[str, object],
-) -> float:
-    candidate = f"{chunk.get('document_name', '')}\n{chunk.get('content', '')}"
-    return _cosine(query_embedding, chunk["embedding"]) + _lexical_overlap(query, candidate)
+def _split_columns(line: str) -> list[str]:
+    if "|" in line:
+        return [part.strip() for part in line.strip().strip("|").split("|")]
+    return [part.strip() for part in re.split(r"\s{2,}|\s+[\\／]\s+", line.strip()) if part.strip()]
 
 
-def _lexical_overlap(query: str, candidate: str) -> float:
-    normalized_query = _normalize_for_search(query)
-    normalized_candidate = _normalize_for_search(candidate)
-    weighted_matches = 0
-    weighted_total = 0
-    for size in (2, 3):
-        grams = {
-            normalized_query[index : index + size]
-            for index in range(len(normalized_query) - size + 1)
+def _table_rows(lines: list[str]) -> list[list[str]] | None:
+    rows = [_split_columns(line) for line in lines]
+    rows = [row for row in rows if row and not all(re.fullmatch(r"[-:=+]+", cell) for cell in row)]
+    if len(rows) < 2 or len(rows[0]) < 2:
+        return None
+    width = len(rows[0])
+    if sum(len(row) == width for row in rows[1:]) < 1:
+        return None
+    return [row for row in rows if len(row) == width]
+
+
+def _parse_blocks(document_id: str, text: str) -> list[dict[str, object]]:
+    lines = text.splitlines()
+    headings: list[str] = []
+    section_id = f"{document_id}:0"
+    blocks: list[dict[str, object]] = []
+    start = 0
+    index = 0
+
+    def flush(end: int) -> None:
+        nonlocal index
+        if start >= end:
+            return
+        raw = "\n".join(lines[start:end]).strip()
+        if not raw:
+            return
+        table = _table_rows(lines[start:end])
+        # Long tables are indexed in pages. Each page repeats the header.
+        pages = [table[:1] + table[i:i + 20] for i in range(1, len(table), 20)] if table and len(table) > 21 else [None]
+        for page_number, page in enumerate(pages):
+            content = raw if page is None else "\n".join(" | ".join(row) for row in page)
+            blocks.append({
+                "id": f"{document_id}:{index}", "document_id": document_id,
+                "section_id": section_id, "kind": "table" if table else "text",
+                "heading": " › ".join(headings), "content": content,
+                "line_start": start + 1 if page is None else start + 2 + page_number * 20,
+                "line_end": end if page is None else min(end, start + 1 + (page_number + 1) * 20),
+            })
+            index += 1
+
+    for i, line in enumerate(lines):
+        match = _HEADING.match(line)
+        if match:
+            flush(i)
+            level = len(match.group(1))
+            headings = headings[:level - 1] + [match.group(2).strip()]
+            section_id = f"{document_id}:{i + 1}"
+            start = i
+        elif not line.strip():
+            flush(i)
+            start = i + 1
+    flush(len(lines))
+    return blocks
+
+
+class GameKnowledge:
+    """Document-only index, hybrid retrieval and source reading."""
+
+    def __init__(self, documents_path: Path, index_store: KnowledgeIndexStore, ollama: OllamaClient, embedding_model: str):
+        self._documents_path = documents_path
+        self._index = index_store
+        self._ollama = ollama
+        self._embedding_model = embedding_model
+
+    def system_policy(self) -> str:
+        return "你是天空之城遊戲顧問。只根據已讀取的文件證據回答。"
+
+    async def rebuild_index(self) -> int:
+        known = self._index.documents()
+        seen: set[str] = set()
+        if self._documents_path.exists():
+            for path in sorted(self._documents_path.rglob("*")):
+                if not path.is_file() or path.name.startswith("."):
+                    continue
+                if path.suffix.lower() not in _SUFFIXES:
+                    logger.warning("略過不支援格式：%s", path.name)
+                    continue
+                if path.stem in _EXCLUDED:
+                    continue
+                document_id = path.relative_to(self._documents_path).as_posix()
+                seen.add(document_id)
+                try:
+                    data = path.read_bytes()
+                    content_hash = hashlib.sha256(data).hexdigest()
+                    if known.get(document_id) == (content_hash, self._embedding_model):
+                        continue
+                    text = data.decode("utf-8-sig")
+                    blocks = _parse_blocks(document_id, text)
+                    for start in range(0, len(blocks), 16):
+                        batch = blocks[start:start + 16]
+                        embeddings = await self._ollama.embed([
+                            f"search_document: {block['heading']}\n{block['content']}" for block in batch
+                        ])
+                        if len(embeddings) != len(batch):
+                            raise RuntimeError("Embedding 數量與文件區塊數量不一致")
+                        for block, embedding in zip(batch, embeddings):
+                            block["embedding"] = embedding
+                    self._index.replace_document(document_id, content_hash, self._embedding_model, text, blocks)
+                    logger.info("已索引 %s：%d 區塊", document_id, len(blocks))
+                except Exception:
+                    logger.exception("文件索引失敗，保留先前版本：%s", document_id)
+                    raise
+        for document_id in known.keys() - seen:
+            self._index.delete_document(document_id)
+            logger.info("已移除刪除文件的索引：%s", document_id)
+        return self._index.count_blocks()
+
+    async def search_documents(self, query: str, limit: int = 8) -> list[dict[str, object]]:
+        known = self._index.documents()
+        if not known:
+            return []
+        models = {model for _, model in known.values()}
+        if models != {self._embedding_model}:
+            raise RuntimeError("Embedding 模型已更換；請先執行 python -m skycity_bot.index_knowledge")
+        vector = (await self._ollama.embed([f"search_query: {query}"]))[0]
+        query_terms = _terms(query)
+        identifiers = {match.group().casefold() for match in _IDENTIFIER.finditer(query)}
+        scored: list[tuple[float, int, dict[str, object]]] = []
+        for position, block in enumerate(self._index.iter_blocks()):
+            content = f"{block['heading']} {block['content']} {block['document_id']}".casefold()
+            block_terms = _terms(content)
+            lexical = len(query_terms & block_terms) / max(1, len(query_terms))
+            identifier_bonus = sum(0.35 for term in identifiers if term in block_terms)
+            score = 0.45 * _cosine(vector, block["embedding"]) + 0.55 * lexical + identifier_bonus
+            item = (score, position, block)
+            if len(scored) < limit:
+                heapq.heappush(scored, item)
+            elif score > scored[0][0]:
+                heapq.heapreplace(scored, item)
+        result = [dict(block, score=round(score, 4)) for score, _, block in sorted(scored, reverse=True)]
+        logger.info("查詢=%r；候選=%s", query, [(b["id"], b["score"]) for b in result])
+        return result
+
+    def read_section(self, document_id: str, section_id: str, cursor: int = 0, char_budget: int = 5000) -> dict[str, object]:
+        blocks = self._index.read_section(document_id, section_id)
+        output: list[dict[str, object]] = []
+        used = 0
+        position = cursor
+        while position < len(blocks):
+            block = blocks[position]
+            length = len(str(block["content"]))
+            if output and used + length > char_budget:
+                break
+            output.append(block)
+            used += length
+            position += 1
+        return {"blocks": output, "next_cursor": position if position < len(blocks) else None, "truncated": position < len(blocks)}
+
+    def read_neighbors(self, document_id: str, block_id: str, before: int = 1, after: int = 1) -> list[dict[str, object]]:
+        target = self._index.get_block(document_id, block_id)
+        if target is None:
+            return []
+        blocks = self._index.read_section(document_id, str(target["section_id"]))
+        for i, block in enumerate(blocks):
+            if block["id"] == block_id:
+                return blocks[max(0, i - before):i + after + 1]
+        return []
+
+    def read_table(self, document_id: str, block_id: str, cursor: int = 0, row_limit: int = 20) -> dict[str, object]:
+        block = self._index.get_block(document_id, block_id)
+        if block is None:
+            return {"rows": [], "next_cursor": None, "truncated": False}
+        rows = self.table_rows(block)
+        if not rows:
+            return {"rows": [], "next_cursor": None, "truncated": False}
+        start = max(1, cursor + 1)
+        end = min(len(rows), start + max(1, row_limit))
+        return {
+            "header": rows[0], "rows": rows[start:end], "source": self.source_label(block),
+            "version": block["version"], "next_cursor": end - 1 if end < len(rows) else None,
+            "truncated": end < len(rows),
         }
-        for gram in grams:
-            weighted_total += size
-            if gram in normalized_candidate:
-                weighted_matches += size
-    return weighted_matches / weighted_total if weighted_total else 0.0
 
+    def source_label(self, block: dict[str, object]) -> str:
+        heading = f" › {block['heading']}" if block["heading"] else ""
+        return f"{block['document_id']}{heading}（第 {block['line_start']}–{block['line_end']} 行）"
 
-def _normalize_for_search(value: str) -> str:
-    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", value.lower())
+    @staticmethod
+    def identifiers(question: str) -> set[str]:
+        return {match.group().casefold() for match in _IDENTIFIER.finditer(question)}
 
+    @staticmethod
+    def numbers(text: str) -> set[str]:
+        return {match.group() for match in _NUMBER.finditer(text)}
 
-def _normalize(value: str) -> str:
-    return re.sub(r"[\s_-]", "", value).lower()
-
-
-def _normalize_currency(value: str) -> str | None:
-    aliases = {
-        "t": "T",
-        "台幣": "T",
-        "台币": "T",
-        "r": "R",
-        "人民幣": "R",
-        "人民币": "R",
-        "xb": "xb",
-        "星幣": "xb",
-        "星币": "xb",
-        "tks": "tks",
-        "天空石": "tks",
-        "ty": "ty",
-        "統御": "ty",
-        "统御": "ty",
-    }
-    return aliases.get(value.strip().lower())
-
-
-def _format_decimal(value: Decimal) -> str:
-    rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return format(rounded, "f").rstrip("0").rstrip(".")
+    @staticmethod
+    def table_rows(block: dict[str, object]) -> list[list[str]] | None:
+        if block["kind"] != "table":
+            return None
+        return _table_rows(str(block["content"]).splitlines())

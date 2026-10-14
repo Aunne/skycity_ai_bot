@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 
 from .assistant import AnswerRequest, SkyCityAssistant
 from .knowledge import GameKnowledge
 from .ollama import OllamaClient
 from .settings import load_settings
-from .storage import Database, KnowledgeIndexStore, MemoryStore, StructuredKnowledgeStore
+from .storage import Database, KnowledgeIndexStore, MemoryStore
 
 
 async def ask(question: str) -> str:
@@ -25,17 +26,18 @@ async def ask(question: str) -> str:
         )
         knowledge = GameKnowledge(
             settings.knowledge_documents_path,
-            settings.structured_knowledge_path,
             KnowledgeIndexStore(database),
-            StructuredKnowledgeStore(database),
             ollama,
+            settings.embedding_model,
         )
+        await knowledge.rebuild_index()
         assistant = SkyCityAssistant(
             ollama,
             knowledge,
             MemoryStore(database),
             settings.memory_message_limit,
             settings.knowledge_top_k,
+            settings.knowledge_context_chars,
         )
         return await assistant.answer(
             AnswerRequest("local", "local", question, remember=False)
@@ -46,11 +48,14 @@ async def ask(question: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="直接測試本機天空之城遊戲顧問")
+    parser.add_argument("--debug", action="store_true", help="顯示檢索與證據讀取紀錄")
     parser.add_argument("question", nargs="*", help="要詢問的問題")
     arguments = parser.parse_args()
     question = " ".join(arguments.question).strip() or input("問題：").strip()
     if not question:
         parser.error("請輸入問題")
+    if arguments.debug:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     print(asyncio.run(ask(question)))
 
 

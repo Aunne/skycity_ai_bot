@@ -3,7 +3,7 @@ import asyncio
 from .knowledge import GameKnowledge
 from .ollama import OllamaClient
 from .settings import load_settings
-from .storage import Database, KnowledgeIndexStore, StructuredKnowledgeStore
+from .storage import Database, KnowledgeIndexStore
 
 
 async def main() -> None:
@@ -21,10 +21,9 @@ async def main() -> None:
     try:
         knowledge = GameKnowledge(
             settings.knowledge_documents_path,
-            settings.structured_knowledge_path,
             KnowledgeIndexStore(database),
-            StructuredKnowledgeStore(database),
             ollama,
+            settings.embedding_model,
         )
         count = await knowledge.rebuild_index()
         print(f"已建立 {count} 個知識切塊。")

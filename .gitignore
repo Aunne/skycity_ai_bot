@@ -10,4 +10,3 @@ __pycache__
 ./__pycache__/config.cpython-311.pyc
 ./__pycache__/dify.cpython-311.pyc
 ./__pycache__/command.cpython-311.pyc
-tests/

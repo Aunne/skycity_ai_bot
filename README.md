@@ -1,89 +1,46 @@
-# SkyCity Discord 顧問
+# SkyCity 文檔問答顧問
 
-Discord 只負責收發訊息；應用程式在本機保存每位玩家的對話、查詢結構化遊戲規則、搜尋攻略文件，再由 Ollama 產生回答。
+把 Markdown (`.md`) 或純文字 (`.txt`) 文件放入 `knowledge/documents/`，即可透過本機 CLI 或現有 Discord 指令提問。一般事實只維護原始文件，不需要另寫寵物數值、匯率等領域專用 SQL 表或 YAML。SQLite 只保存對話記憶、文件版本與通用檢索區塊。
 
-## 架構
-
-```text
-Discord
-  -> SkyCityAssistant
-      -> SQLite (每位玩家記憶、結構化規則、語意索引)
-      -> GameKnowledge (精確規則查詢 + 攻略語意檢索)
-      -> OllamaClient (qwen3.5:4b)
-```
+聊天模型維持呼叫設定的 Ollama API（可為 Ollama Cloud）；embedding 可留在本機 Ollama。文件內容會送到 **embedding API** 以建立索引，檢索到的原文片段會送到 **聊天 API** 產生一般問答。若使用遠端服務，請只將允許送往該服務的文件放入知識目錄。
 
 ## 設定
 
-複製 `config.sample.yaml` 為 `config.yaml`，填入 Discord Bot Token。舊設定中的 `DIFY_API_KEY` 已不再使用。
-
-將 Markdown 知識文件放進 `knowledge/documents`，或修改 `KNOWLEDGE_DOCUMENTS_PATH` 指向既有文件目錄。索引器同時相容舊的 `.txt`，新文件建議使用 `.md`。
-
-## 本地模型
-
-```cmd
-ollama pull qwen3.5:4b
-ollama pull nomic-embed-text-v2-moe
-```
-
-## Ollama Cloud 聊天模型
-
-聊天模型可改由 Ollama Cloud 執行，而文件 embedding 維持使用本機 Ollama。將下列設定加入 `config.yaml`，並將 API Key 替換為自己的值：
+複製 `config.sample.yaml` 為 `config.yaml`，設定 API 端點、模型與 Discord Bot Token。API Key 建議放在 `OLLAMA_API_KEY` 環境變數。`KNOWLEDGE_DOCUMENTS_PATH` 可改成自己的文件目錄；相對路徑以專案根目錄為基準。
 
 ```yaml
 OLLAMA_BASE_URL: "https://ollama.com"
-OLLAMA_API_KEY: "你的 Ollama Cloud API Key"
 OLLAMA_CHAT_MODEL: "gpt-oss:120b"
-
 OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
 OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
+KNOWLEDGE_DOCUMENTS_PATH: "knowledge/documents"
+KNOWLEDGE_TOP_K: 5
+KNOWLEDGE_CONTEXT_CHARS: 6000
 ```
 
-此配置需要本機 Ollama 保留 `nomic-embed-text-v2-moe`，因為 Bot 每次啟動都會用它重建搜尋索引。聊天回答則交由 Ollama Cloud，不需要本機 GPU。
-
-## Ollama Cloud 聊天模型
-
-聊天模型可改由 Ollama Cloud 執行，而文件 embedding 維持使用本機 Ollama。將下列設定加入 `config.yaml`，並將 API Key 替換為自己的值：
-
-```yaml
-OLLAMA_BASE_URL: "https://ollama.com"
-OLLAMA_API_KEY: "你的 Ollama Cloud API Key"
-OLLAMA_CHAT_MODEL: "gpt-oss:120b"
-
-OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
-OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
-```
-
-此配置需要本機 Ollama 保留 `nomic-embed-text-v2-moe`，因為 Bot 每次啟動都會用它重建搜尋索引。聊天回答則交由 Ollama Cloud，不需要本機 GPU。
-
-## 安裝與建立語意索引
+文件更新後執行索引命令，或直接使用 `ask.py`：它會先檢查文件雜湊，只重新索引新增或修改的文件，並移除已刪文件的索引。Bot 啟動時也會執行相同的增量檢查。更換 embedding 模型後會重建不相容的文件向量。索引失敗時保留該文件之前的有效版本，修正後重試即可。
 
 ```cmd
 .\.venv\Scripts\pip3.exe install -r requirements.txt
 .\.venv\Scripts\python.exe -m skycity_bot.index_knowledge
+.\.venv\Scripts\python.exe -m skycity_bot.ask "商寵 L5 最大成長值是多少？"
 ```
 
-文件內容異動後，重新執行索引命令。結構化寵物規則放在 `knowledge/structured.yaml`，不經向量搜尋。
+在 Windows cmd 若中文字顯示亂碼，先執行 `chcp 65001`，再加上 `-X utf8` 執行 Python。
 
-固定匯率與成本換算也放在 `knowledge/structured.yaml`。例如市場價格的 `1 T = 2.7 xb` 會由程式以 `xb ÷ 2.7 = T` 計算；Bot 不會自行判斷匯率方向。更新匯率後重啟 Bot 即會同步結構化資料並重建索引。
+## 文件寫法與回答
 
-固定匯率與成本換算也放在 `knowledge/structured.yaml`。例如市場價格的 `1 T = 2.7 xb` 會由程式以 `xb ÷ 2.7 = T` 計算；Bot 不會自行判斷匯率方向。更新匯率後重啟 Bot 即會同步結構化資料並重建索引。
+使用 Markdown 標題分章節，表格請用標準 Markdown 表格。索引保留章節、原文、行號與內容雜湊；長表格會分頁並重複欄名。檢索結合語意向量與字面線索，先找候選，再讀原文章節。精確識別字如 `L5` 必須在證據中出現。若答案缺少依據或來源互相衝突，顧問會說明，而不借用相近條目的數值。引用指向文件和行號；沒有可靠頁碼的文字文件不會顯示頁碼。
 
-## 執行
+目前支援 UTF-8 Markdown 與文字。PDF、DOCX 與掃描文件尚未解析。一般問答仍受外部模型閱讀能力影響；程式會檢查引用是否存在、識別字及數字是否出現在引用原文，這不能取代語意正確性評估。
+
+若要查看候選區塊、讀取範圍、版本、截斷狀態與問答耗時，執行 `skycity_bot.ask --debug "問題"`；Discord 執行時會寫入 `bot.log`。
+
+## 測試與 Discord
 
 ```cmd
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe bot.py
 ```
 
-Discord 文字指令：
-
-- `顧問 <問題>`：回答並保存該使用者的對話記憶。
-- `/test <問題>`：單次回答，不讀取或保存對話記憶。
-- `/forget`：刪除發出指令者的所有對話記憶。
-- `/inviteurl`：建立單次邀請連結。
-- `/setPass @成員`：依既有權限規則授予身分組。
-
-不啟動 Discord，直接測試本機問答：
-
-```cmd
-.\.venv\Scripts\python.exe -m skycity_bot.ask "道具店寵物 L5 的最高成長值是多少？"
-```
+本機問答只需 `skycity_bot.ask`，不必啟動 Discord。Discord 仍支援 `顧問 <問題>`、`/test <問題>`、`/forget`、`/inviteurl`、`/setPass @成員`。`/test` 不保存對話記憶。

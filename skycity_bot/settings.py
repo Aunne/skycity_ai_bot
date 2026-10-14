@@ -17,10 +17,10 @@ class Settings:
     embedding_api_key: str
     embedding_model: str
     knowledge_documents_path: Path
-    structured_knowledge_path: Path
     allowed_channels: frozenset[int]
     limit_speaking_channels: bool
     knowledge_top_k: int
+    knowledge_context_chars: int
     memory_message_limit: int
 
     def channel_is_allowed(self, channel_id: int) -> bool:
@@ -74,9 +74,9 @@ def load_settings(config_path: str | Path = "config.yaml") -> Settings:
         embedding_api_key=embedding_api_key,
         embedding_model=str(raw.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text-v2-moe")),
         knowledge_documents_path=documents_path,
-        structured_knowledge_path=project_root / "knowledge" / "structured.yaml",
         allowed_channels=frozenset(int(value) for value in raw.get("ALLOWED_CHANNELS", [])),
         limit_speaking_channels=bool(raw.get("LIMIT_SPEAKING_CHANNELS", False)),
         knowledge_top_k=max(1, int(raw.get("KNOWLEDGE_TOP_K", 5))),
+        knowledge_context_chars=max(500, int(raw.get("KNOWLEDGE_CONTEXT_CHARS", 6000))),
         memory_message_limit=max(2, int(raw.get("MEMORY_MESSAGE_LIMIT", 12))),
     )

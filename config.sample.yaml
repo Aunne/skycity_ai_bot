@@ -8,9 +8,10 @@ OLLAMA_EMBEDDING_BASE_URL: "http://127.0.0.1:11434"
 OLLAMA_EMBEDDING_MODEL: "nomic-embed-text-v2-moe"
 OLLAMA_API_KEY: "在此填入你的 Ollama Cloud API Key"
 
-# 放置遊戲攻略 .txt 文件的目錄；相對路徑會以專案根目錄為基準。
+# Markdown / UTF-8 文字文件目錄；相對路徑以專案根目錄為基準。
 KNOWLEDGE_DOCUMENTS_PATH: "knowledge/documents"
 KNOWLEDGE_TOP_K: 5
+KNOWLEDGE_CONTEXT_CHARS: 6000
 MEMORY_MESSAGE_LIMIT: 12
 
 ALLOWED_CHANNELS: []
