@@ -180,7 +180,7 @@ async def rebuild_knowledge_index(settings: Settings) -> int:
             settings.embedding_model,
         )
         count = await knowledge.rebuild_index()
-        logger.info("Rebuilt %s knowledge chunks before Discord startup", count)
+        logger.info("Discord 啟動前索引檢查完成：共 %s 個知識區塊（包含未變更的文件）", count)
         return count
     finally:
         database.close()

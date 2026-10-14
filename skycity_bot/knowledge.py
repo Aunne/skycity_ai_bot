@@ -14,7 +14,6 @@ from .storage import KnowledgeIndexStore
 
 logger = logging.getLogger(__name__)
 _SUFFIXES = {".md", ".txt"}
-_EXCLUDED = {"機器人顧問守則", "目前知識庫版本"}
 _HEADING = re.compile(r"^(#{1,6})\s+(.+)$")
 _IDENTIFIER = re.compile(r"(?<![a-zA-Z0-9])(?:[a-zA-Z]+\d+|\d+[a-zA-Z]+)(?![a-zA-Z0-9])")
 _NUMBER = re.compile(r"(?<![a-zA-Z0-9])(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?(?![a-zA-Z0-9])")
@@ -120,8 +119,6 @@ class GameKnowledge:
                 if path.suffix.lower() not in _SUFFIXES:
                     logger.warning("略過不支援格式：%s", path.name)
                     continue
-                if path.stem in _EXCLUDED:
-                    continue
                 document_id = path.relative_to(self._documents_path).as_posix()
                 seen.add(document_id)
                 try:
@@ -148,7 +145,9 @@ class GameKnowledge:
         for document_id in known.keys() - seen:
             self._index.delete_document(document_id)
             logger.info("已移除刪除文件的索引：%s", document_id)
-        return self._index.count_blocks()
+        total_blocks = self._index.count_blocks()
+        logger.info("索引檢查完成：共 %d 份文件、%d 個區塊（包含未變更的文件）", len(self._index.documents()), total_blocks)
+        return total_blocks
 
     async def search_documents(self, query: str, limit: int = 8) -> list[dict[str, object]]:
         known = self._index.documents()

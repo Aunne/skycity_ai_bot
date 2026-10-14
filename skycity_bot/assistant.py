@@ -23,6 +23,13 @@ def _citations(answer: str) -> set[int]:
     return {int(first or second) for first, second in _CITATION.findall(answer)}
 
 
+def _substantive_block(content: str) -> bool:
+    return any(
+        line and not line.startswith(("#", "資料來源："))
+        for line in (part.strip() for part in content.splitlines())
+    )
+
+
 @dataclass(frozen=True)
 class AnswerRequest:
     guild_id: str
@@ -105,7 +112,7 @@ class SkyCityAssistant:
 
         # Headings and source URLs help indexing, but they dilute the answer
         # prompt. Keep the substantive blocks from the selected sections.
-        evidence = [block for block in evidence if not str(block["content"]).lstrip().startswith(("#", "資料來源："))]
+        evidence = [block for block in evidence if _substantive_block(str(block["content"]))]
         evidence = evidence[:16]
 
         # Exact identifiers must occur in the evidence itself. Similarity cannot substitute L4 for L5.

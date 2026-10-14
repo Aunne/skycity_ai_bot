@@ -1,10 +1,15 @@
 import unittest
 
-from skycity_bot.assistant import SkyCityAssistant
+from skycity_bot.assistant import SkyCityAssistant, _substantive_block
 from skycity_bot.knowledge import GameKnowledge
 
 
 class GroundingChecks(unittest.TestCase):
+    def test_heading_with_body_remains_available_as_evidence(self):
+        self.assertTrue(_substantive_block("# 機器人顧問守則\n作者是武林鬼武者。"))
+        self.assertFalse(_substantive_block("# 機器人顧問守則"))
+        self.assertFalse(_substantive_block("資料來源：https://example.test/source"))
+
     def test_number_unit_must_match_source(self):
         self.assertIn(("163", "台幣"), GameKnowledge.number_units("約 163 台幣"))
         self.assertNotIn(("163", "XB"), GameKnowledge.number_units("約 163 台幣"))
